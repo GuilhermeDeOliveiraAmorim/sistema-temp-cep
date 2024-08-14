@@ -5,24 +5,38 @@ import (
 	"log"
 
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/zipkin"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/sdk/resource"
 	"go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
+	"google.golang.org/grpc"
 )
 
-// initTracer configura o OpenTelemetry para usar o Zipkin como exportador
 func initTracer() func() {
-	exporter, err := zipkin.New(
-		"http://zipkin:9411/api/v2/spans",
-		zipkin.WithLogger(log.Default()),
-	)
+	ctx := context.Background()
+
+	conn, err := grpc.DialContext(ctx, "otel-collector:4317", grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
-		log.Fatalf("failed to create Zipkin exporter: %v", err)
+		log.Fatalf("failed to create gRPC connection to collector: %v", err)
 	}
 
-	provider := trace.NewTracerProvider(
+	exporter, err := otlptracegrpc.New(ctx, otlptracegrpc.WithGRPCConn(conn))
+	if err != nil {
+		log.Fatalf("failed to create the collector exporter: %v", err)
+	}
+
+	tp := trace.NewTracerProvider(
 		trace.WithBatcher(exporter),
-		trace.WithSampler(trace.AlwaysSample()),
+		trace.WithResource(resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceName("service-a"),
+		)),
 	)
-	otel.SetTracerProvider(provider)
-	return func() { _ = provider.Shutdown(context.Background()) }
+	otel.SetTracerProvider(tp)
+
+	return func() {
+		if err := tp.Shutdown(ctx); err != nil {
+			log.Fatalf("failed to shut down tracer provider: %v", err)
+		}
+	}
 }

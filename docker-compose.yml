@@ -5,16 +5,26 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      - zipkin
+      - otel-collector
 
   service-b:
     build: ./service-b
     ports:
       - "8081:8081"
     depends_on:
-      - zipkin
+      - otel-collector
 
   zipkin:
     image: openzipkin/zipkin
     ports:
       - "9411:9411"
+
+  otel-collector:
+    image: otel/opentelemetry-collector:0.79.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317" # Receber traces/métricas usando o protocolo gRPC
+      - "4318:4318" # Receber traces/métricas usando o protocolo HTTP
+      - "55680:55680" # Receber traces/métricas usando protocolo jaeger

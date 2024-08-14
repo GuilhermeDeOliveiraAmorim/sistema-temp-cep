@@ -16,14 +16,19 @@ Além disso, o projeto utiliza OpenTelemetry e Zipkin para rastreamento distribu
 
 /project-root
 ├── service-a/
+│ ├── go.mod
+│ ├── go.sum
 │ ├── main.go
 │ ├── tracing.go
 │ └── Dockerfile
 ├── service-b/
+│ ├── go.mod
+│ ├── go.sum
 │ ├── main.go
 │ ├── tracing.go
 │ └── Dockerfile
 ├── docker-compose.yml
+├── otel-collector-config.yaml
 └── README.md
 
 ## Configuração
@@ -40,15 +45,20 @@ Use o Docker Compose para construir e iniciar os serviços:
 
 docker-compose up --build
 
-Isso iniciará três serviços:
+## Serviços Incluídos
 
-Serviço A na porta 8080
-Serviço B na porta 8081
-Zipkin na porta 9411
+- **Serviço A** na porta 8080
+- **Serviço B** na porta 8081
+- **Zipkin** na porta 9411
+- **Otel Collector** na porta 4317 (gRPC) e 4318 (HTTP)
 
-Acesse o Zipkin no navegador para garantir que ele está rodando corretamente:
+## Configuração do OpenTelemetry e Zipkin
 
-http://localhost:9411
+O OpenTelemetry está configurado para enviar spans ao Otel Collector, que por sua vez, exporta os dados para o Zipkin.
+
+### Executar Otel Collector
+
+O Otel Collector será iniciado automaticamente com o Docker Compose. Você pode verificar os spans coletados acessando o Zipkin em:
 
 Use curl para enviar uma requisição POST para o Serviço A com um CEP válido:
 
