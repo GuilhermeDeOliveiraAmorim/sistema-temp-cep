@@ -66,3 +66,8 @@ curl -X POST http://localhost:8080/cep \
      -H "Content-Type: application/json" \
      -d '{"cep": "29902555"}'
 ```
+
+curl -X POST http://localhost:8080/cep \
+     -H "Content-Type: application/json" \
+     -d '{"cep": "57303120"}'
+```
