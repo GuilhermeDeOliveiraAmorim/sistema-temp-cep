@@ -60,14 +60,15 @@ O OpenTelemetry está configurado para enviar spans ao Otel Collector, que por s
 
 O Otel Collector será iniciado automaticamente com o Docker Compose. Você pode verificar os spans coletados acessando o Zipkin em:
 
+http://localhost:9411/
+
 Use curl para enviar uma requisição POST para o Serviço A com um CEP válido:
 
-curl -X POST http://localhost:8080/cep \
-     -H "Content-Type: application/json" \
-     -d '{"cep": "29902555"}'
-```
+curl --request POST \
+  --url http://localhost:8080/cep \
+  --header 'Content-Type: application/json' \
+  --data '{"cep":"57303120"}'
 
-curl -X POST http://localhost:8080/cep \
-     -H "Content-Type: application/json" \
-     -d '{"cep": "57303120"}'
+curl --request GET \
+  --url http://localhost:8081/cep/13015100
 ```

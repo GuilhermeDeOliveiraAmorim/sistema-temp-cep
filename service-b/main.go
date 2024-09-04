@@ -8,14 +8,23 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 )
 
 var baseURL = "https://viacep.com.br/ws/"
+
+type Cep struct {
+	Cep string `json:"cep"`
+}
+
+type Output struct {
+	City    string             `json:"city"`
+	Weather map[string]float64 `json:"weather"`
+}
 
 func createHTTPClient() *http.Client {
 	tr := &http.Transport{
@@ -109,59 +118,78 @@ func convertTemperature(tempC float64) (float64, float64) {
 	return tempF, tempKFloat
 }
 
-func weatherHandler(w http.ResponseWriter, r *http.Request) {
+func weatherHandlerGin(ctx *gin.Context) {
+	startTime := time.Now()
+
 	tracer := otel.Tracer("service-b")
-	ctx, span := tracer.Start(r.Context(), "weatherHandler")
+	_, span := tracer.Start(ctx.Request.Context(), "processing_in_service_b")
 	defer span.End()
 
-	cep := strings.TrimPrefix(r.URL.Path, "/weather/")
+	cep := ctx.Param("cep")
+	if cep == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "CEP is required"})
+		return
+	}
+
+	input := Cep{
+		Cep: cep,
+	}
+
+	span.SetAttributes(attribute.String("cep", input.Cep))
 
 	getLocationByCEPStartTime := time.Now()
-	_, childSpan := tracer.Start(ctx, "get_location_by_cep")
-	defer childSpan.End()
 
-	city, statusCode, err := getLocationByCEP(cep)
+	city, statusCode, err := getLocationByCEP(input.Cep)
 	if err != nil && statusCode == http.StatusUnprocessableEntity {
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		ctx.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 		return
 	} else if statusCode == http.StatusNotFound {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 
 	cepServiceDuration := time.Since(getLocationByCEPStartTime)
-	childSpan.SetAttributes(attribute.Float64("get_location_by_cep_duration_ms", float64(cepServiceDuration.Milliseconds())))
+	span.SetAttributes(attribute.String("get_location_by_cep_duration", cepServiceDuration.String()))
 
 	getWeatherByCityStartTime := time.Now()
-	_, childSpan = tracer.Start(ctx, "get_weather_by_city")
-	defer childSpan.End()
 
 	tempC, err := getWeatherByCity(city)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+	if err != nil && statusCode == http.StatusUnprocessableEntity {
+		ctx.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		return
+	} else if statusCode == http.StatusNotFound {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 
 	tempF, tempK := convertTemperature(tempC)
 
-	response := map[string]float64{
+	weather := map[string]float64{
 		"temp_C": tempC,
 		"temp_F": tempF,
 		"temp_K": tempK,
 	}
 
-	getWeatherByCityDuration := time.Since(getWeatherByCityStartTime)
-	childSpan.SetAttributes(attribute.Float64("get_weather_by_city_duration_ms", float64(getWeatherByCityDuration.Milliseconds())))
+	output := Output{
+		City:    city,
+		Weather: weather,
+	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+	getWeatherByCityDuration := time.Since(getWeatherByCityStartTime)
+	span.SetAttributes(attribute.String("get_weather_by_city_duration", getWeatherByCityDuration.String()))
+
+	endTime := time.Since(startTime)
+	span.SetAttributes(attribute.String("total_duration_in_service_b", endTime.String()))
+
+	ctx.JSON(http.StatusOK, output)
 }
 
 func main() {
 	shutdown := initTracer()
 	defer shutdown()
 
-	http.HandleFunc("/cep/", weatherHandler)
-	http.ListenAndServe(":8081", nil)
+	r := gin.Default()
+
+	r.GET("/cep/:cep", weatherHandlerGin)
+	r.Run(":8081")
 }

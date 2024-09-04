@@ -1,70 +1,75 @@
 package main
 
 import (
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"regexp"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 )
+
+type Cep struct {
+	Cep string `json:"cep"`
+}
+
+type Output struct {
+	City    string             `json:"city"`
+	Weather map[string]float64 `json:"weather"`
+}
 
 func validateCep(cep string) bool {
 	match, _ := regexp.MatchString(`^\d{8}$`, cep)
 	return match
 }
 
-func cepHandler(w http.ResponseWriter, r *http.Request) {
-	tracer := otel.Tracer("service-a")
-	ctx, span := tracer.Start(r.Context(), "cepHandler")
-	defer span.End()
-
+func cepHandlerGin(ctx *gin.Context) {
 	startTime := time.Now()
 
-	var request struct {
-		Cep string `json:"cep"`
-	}
+	tracer := otel.Tracer("service-a")
 
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		http.Error(w, "Invalid input", http.StatusBadRequest)
-		span.SetAttributes(attribute.String("error", "Invalid input"))
+	_, span := tracer.Start(ctx.Request.Context(), "request_to_service_b")
+	defer span.End()
+
+	var input Cep
+	if err := ctx.ShouldBindJSON(&input); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	fmt.Println(request.Cep)
-	fmt.Println(!validateCep(request.Cep))
+	span.SetAttributes(attribute.String("cep", input.Cep))
 
-	span.SetAttributes(attribute.String("cep", request.Cep))
-
-	if !validateCep(request.Cep) {
-		http.Error(w, "invalid zipcode", http.StatusUnprocessableEntity)
+	if !validateCep(input.Cep) {
 		span.SetAttributes(attribute.String("error", "invalid zipcode"))
+		ctx.JSON(http.StatusUnprocessableEntity, gin.H{"error": "invalid zipcode"})
 		return
 	}
 
-	cepServiceStartTime := time.Now()
-	fmt.Println(cepServiceStartTime)
-	_, childSpan := tracer.Start(ctx, "forwardToServiceB")
-	defer childSpan.End()
+	sendRequestToServiceBStartTime := time.Now()
 
-	childSpan.SetAttributes(attribute.String("cep", request.Cep))
-	childSpan.SetAttributes(attribute.String("redirect_url", "http://sistema-b/cep/"+request.Cep))
+	span.SetAttributes(attribute.String("redirect_url", "http://localhost:8081/cep/"+input.Cep))
 
-	http.Redirect(w, r, "http://sistema-b/cep/"+request.Cep, http.StatusSeeOther)
+	ctx.Redirect(http.StatusSeeOther, "http://localhost:8081/cep/"+input.Cep)
 
-	cepServiceDuration := time.Since(cepServiceStartTime)
-	childSpan.SetAttributes(attribute.Float64("cep_service_duration_ms", float64(cepServiceDuration.Milliseconds())))
+	cepServiceDuration := time.Since(sendRequestToServiceBStartTime)
+
+	span.SetAttributes(attribute.String("cep_service_duration", cepServiceDuration.String()))
 
 	totalDuration := time.Since(startTime)
-	span.SetAttributes(attribute.Float64("total_execution_duration_ms", float64(totalDuration.Milliseconds())))
+
+	span.SetAttributes(attribute.String("total_execution_duration", totalDuration.String()))
 }
 
 func main() {
 	shutdown := initTracer()
 	defer shutdown()
 
-	http.HandleFunc("/cep", cepHandler)
-	http.ListenAndServe(":8080", nil)
+	r := gin.Default()
+
+	r.GET("/", func(ctx *gin.Context) {
+		ctx.String(http.StatusOK, "Welcome to Service A!")
+	})
+	r.POST("/cep/", cepHandlerGin)
+	r.Run(":8080")
 }
